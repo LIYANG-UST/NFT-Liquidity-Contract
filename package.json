@@ -1,0 +1,24 @@
+{
+  "name": "nft-liquidity-contract",
+  "version": "1.0.0",
+  "description": "NFT valuing and NFT value adding platform",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LIYANG-UST/NFT-Liquidity-Contract.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/LIYANG-UST/NFT-Liquidity-Contract/issues"
+  },
+  "homepage": "https://github.com/LIYANG-UST/NFT-Liquidity-Contract#readme",
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.3.2"
+  }
+}
