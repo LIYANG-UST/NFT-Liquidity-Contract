@@ -79,7 +79,7 @@ module.exports = {
   },
 
   contracts_directory: "./contracts/",
-  contracts_build_directory: "./src/contracts/",
+  contracts_build_directory: "./build/",
   // Configure your compilers
   compilers: {
     solc: {

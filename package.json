@@ -6,7 +6,8 @@
     "test": "test"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "docgen": "solidoc2 ./ ./docs"
   },
   "repository": {
     "type": "git",
@@ -19,6 +20,10 @@
   },
   "homepage": "https://github.com/LIYANG-UST/NFT-Liquidity-Contract#readme",
   "dependencies": {
-    "@openzeppelin/contracts": "^4.3.2"
+    "@openzeppelin/contracts": "^4.3.2",
+    "solidity-docgen": "^0.5.16"
+  },
+  "devDependencies": {
+    "solc-0.8": "npm:solc@^0.8.9"
   }
 }

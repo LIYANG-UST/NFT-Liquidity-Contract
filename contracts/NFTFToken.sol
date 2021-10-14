@@ -16,10 +16,12 @@ contract NFTFToken is ERC20 {
 
     modifier onlyOwner() {
         require(msg.sender == owner, "only the owner can call this functon");
+        _;
     }
 
     modifier onlyMinter() {
         require(msg.sender == minter, "only the minter can call this function");
+        _;
     }
 
     function passMinterRole(address _newMinter) external onlyOwner {
