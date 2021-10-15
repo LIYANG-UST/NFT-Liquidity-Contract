@@ -106,6 +106,7 @@ function burn(address _account, uint256 _amount) external nonpayable onlyMinter
 
 ## Contracts
 
+* [Address](Address.md)
 * [Context](Context.md)
 * [ERC20](ERC20.md)
 * [IERC165](IERC165.md)
@@ -115,3 +116,4 @@ function burn(address _account, uint256 _amount) external nonpayable onlyMinter
 * [LendCore](LendCore.md)
 * [Migrations](Migrations.md)
 * [NFTFToken](NFTFToken.md)
+* [SafeERC20](SafeERC20.md)
