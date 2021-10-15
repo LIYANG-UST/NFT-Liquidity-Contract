@@ -12,13 +12,15 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 ///         by a bider will have its unique id:
 ///
 ///             NFTID = keccak256(abi.encodePacked(tokenAddress, tokenId))
+///             BIDID = keccak256(abi.encodePacked(biderAddress, tokenAddress))
+///             (Frontend) web3.utils.soliditySha3(<parameters>)
 ///
 ///         Every bid will be associated with a certain NFT and a NFT will
 ///         match several bids:
-///
+///             NFT => [bid, bid, bid...]
+///             bid => NFT
 ///             mapping(bytes32 NFTID => bytes32[] BidId)
 ///
-///         每个Bid 对应一个NFT  一个NFT对应多个Bid    NFT=>Bids
 ///         匹配成功， 由staker触发匹配订单交易 存储成功的/正在进行订单 NFT=>Bid
 ///         staker提取 NFT  需要还清利息
 ///         lender提取 NFT  需要满足清算条件 check清算条件  取消订单 cancelOrder
@@ -33,17 +35,18 @@ contract LendCore {
 
     uint256 bidRewardPerBlock;
 
+    uint256 feeRate;
+
     enum Status {
+        NULL,
         FREE,
-        MATCHED,
-        REDEEMED,
-        LIQUIDATED
+        MATCHED
     }
 
     /// @dev BidInfo defination and storage
     struct BidInfo {
         address bider;
-        uint256 bidPrice;
+        uint256 bidAmount;
         uint256 startBlock;
         uint256 interestPerBlock;
         uint256 timeLength; // in terms of block
@@ -76,12 +79,34 @@ contract LendCore {
         uint256 _interestRate,
         uint256 _timeLength
     );
-    event NFTRedeemed(address _tokenAddress, uint256 _tokenId, address _owner);
+    event OrderMatched(
+        address _tokenAddress,
+        uint256 _tokenId,
+        address _staker,
+        address _bider
+    );
+    event FreeNFTRedeemed(
+        address _tokenAddress,
+        uint256 _tokenId,
+        address _owner
+    );
+    event MatchedNFTRedeemed(
+        address _tokenAddress,
+        uint256 _tokenId,
+        address _owner
+    );
+    event Liquidation(address _tokenAddress, uint256 _tokenId, address _owner);
+    event OwnershipTransfer(address _newOwner);
 
-    constructor(uint256 _bidRewardPerBlock) {
+    constructor(uint256 _bidRewardPerBlock, uint256 _feeRate) {
         owner = msg.sender;
         bidRewardPerBlock = _bidRewardPerBlock;
+        feeRate = _feeRate;
     }
+
+    ///  ******************************  ///
+    ///          Modifier Part           ///
+    ///  ******************************  ///
 
     /// @notice Not allow contract address
     modifier notContract() {
@@ -89,6 +114,16 @@ contract LendCore {
         require(msg.sender == tx.origin, "Proxy contract not allowed");
         _;
     }
+
+    /// @notice Only the owner can call some functions
+    modifier onlyOwner() {
+        require(msg.sender == owner, "only the owner can call this function");
+        _;
+    }
+
+    ///  ******************************  ///
+    ///        View Function Part        ///
+    ///  ******************************  ///
 
     /// @notice check the pending interest for a user
     /// @param _NFTID: NFT ID (bytes32)
@@ -142,6 +177,10 @@ contract LendCore {
         return _nftInfo;
     }
 
+    ///  ******************************  ///
+    ///        Main Function Part        ///
+    ///  ******************************  ///
+
     /// @notice User deposit NFT into the contract, and wait for bids
     /// @param _tokenAddress: NFT token address
     /// @param _tokenId: NFT token Id
@@ -164,9 +203,8 @@ contract LendCore {
         emit NFTDeposited(_tokenAddress, _tokenId, msg.sender);
     }
 
-    /// @notice start a new bid
+    /// @notice Start a new bid
     /// @param _NFTID: NFTID = keccak256(abi.encodePacked(_tokenAddress, _tokenId))
-    ///                (Frontend) web3.utils.soliditySha3(_tokenAddress, _tokenId)
     /// @param _bidAmount: the amount of the loan(in USD)
     /// @param _interestPerBlock: interest per block
     /// @param _timeLength: how long this loan will last
@@ -175,9 +213,11 @@ contract LendCore {
         uint256 _bidAmount,
         uint256 _interestPerBlock,
         uint256 _timeLength
-    ) public notContract {
+    ) external notContract {
         require(_bidAmount > 0, "bid amount need to be larger than zero");
         require(_interestPerBlock > 0, "should have some interest");
+        require(_timeLength > 0, "should have a period");
+
         bytes32 bidId = keccak256(abi.encodePacked(msg.sender, _NFTID));
 
         BidInfo memory tempBidInfo = BidInfo(
@@ -194,6 +234,7 @@ contract LendCore {
 
         matchList[_NFTID].push(bidId);
 
+        // deposit some assets into this contract
         usd.safeTransferFrom(msg.sender, address(this), _bidAmount);
 
         emit NewBid(
@@ -206,7 +247,7 @@ contract LendCore {
     }
 
     /// @notice Redeem a bid
-    /// @param _bidId: BidId (bytes32)
+    /// @param _bidId: Bid Id (bytes32)
     function redeemBid(bytes32 _NFTID, bytes32 _bidId) external notContract {
         BidInfo memory bid = bidList[_bidId];
         require(bid.isMatched == false, "can not withdraw a matched bid");
@@ -218,7 +259,7 @@ contract LendCore {
 
     /// @notice Match the order. Notify the depositer when his NFT has new bid.
     ///         He can choose one from all the bids and match the order.
-    /// @param _NFTID： bytes32 NFTID
+    /// @param _NFTID： NFT ID (bytes32)
     /// @param _bidOrder: the position of this order in the bid list
     function matchOrder(bytes32 _NFTID, uint256 _bidOrder)
         external
@@ -236,13 +277,24 @@ contract LendCore {
         bidList[bidId].startBlock = block.number;
         bidList[bidId].isMatched = true;
 
-        usd.safeTransfer(msg.sender, bidList[bidId].bidPrice);
+        // The staker get his loan
+        usd.safeTransfer(msg.sender, bidList[bidId].bidAmount);
 
         // Delete all unmatched bids
-        withdrawUnmatchedFunds(_NFTID, _bidOrder);
-        delete matchList[_NFTID];
+        // withdrawUnmatchedFunds(_NFTID, _bidOrder);
+        // delete matchList[_NFTID];
+        emit OrderMatched(
+            nft.tokenAddress,
+            nft.tokenId,
+            msg.sender,
+            bidList[bidId].bider
+        );
     }
 
+    /// @notice Liquidate a matched order
+    ///         The lender will get the NFT itself and the matched order will be cancelled
+    /// @param _NFTID: NFT ID (bytes32)
+    /// @param _referencePrice: Price from oracle
     function liquidation(bytes32 _NFTID, uint256 _referencePrice) external {
         NFTInfo storage nft = NFTList[_NFTID];
         require(nft.tokenAddress != address(0), "this NFT does not exist");
@@ -251,12 +303,13 @@ contract LendCore {
 
         require(
             nft.status == Status.MATCHED,
-            "this nft has already been redeemed"
+            "this nft is not matched currently"
         );
 
         checkLiquidation(_NFTID, _referencePrice);
 
         transferNFT(nft.tokenAddress, nft.tokenId, msg.sender);
+        emit Liquidation(nft.tokenAddress, nft.tokenId, msg.sender);
 
         delete NFTList[_NFTID];
     }
@@ -265,28 +318,36 @@ contract LendCore {
     /// @param _NFTID: NFT ID
     function redeemNFT(bytes32 _NFTID) external {
         NFTInfo storage nft = NFTList[_NFTID];
-        checkOwnership(nft.tokenAddress, nft.tokenId);
 
-        require(
-            nft.status != Status.REDEEMED,
-            "this nft has already been redeemed"
-        );
+        require(nft.tokenAddress != address(0), "this nft does not exist");
+
+        checkOwnership(nft.tokenAddress, nft.tokenId);
 
         if (nft.status == Status.FREE) {
             /// @dev If it is free, the owner can redeem it back
             transferNFT(nft.tokenAddress, nft.tokenId, msg.sender);
+            emit FreeNFTRedeemed(nft.tokenAddress, nft.tokenId, msg.sender);
         } else if (nft.status == Status.MATCHED) {
             /// @dev If it is matched, you need to pay the interest first
             uint256 interestToPay = pendingInterest(_NFTID);
-            usd.safeTransferFrom(msg.sender, address(this), interestToPay);
+            uint256 loanAmount = bidList[activeMatchList[_NFTID]].bidAmount;
+            address lender = bidList[activeMatchList[_NFTID]].bider;
+            usd.safeTransferFrom(
+                msg.sender,
+                lender,
+                interestToPay + loanAmount
+            );
             transferNFT(nft.tokenAddress, nft.tokenId, msg.sender);
+            emit MatchedNFTRedeemed(nft.tokenAddress, nft.tokenId, msg.sender);
         }
-
-        emit NFTRedeemed(nft.tokenAddress, nft.tokenId, msg.sender);
 
         delete NFTList[_NFTID];
         delete matchList[_NFTID];
     }
+
+    ///  ******************************  ///
+    ///      Internal Function Part      ///
+    ///  ******************************  ///
 
     /// @notice Check if an address is a contract
     /// @param _addr: address to be checked
@@ -318,12 +379,13 @@ contract LendCore {
             if (i != _matchOrder) {
                 usd.safeTransfer(
                     bidList[matchList[_NFTID][i]].bider,
-                    bidList[matchList[_NFTID][i]].bidPrice
+                    bidList[matchList[_NFTID][i]].bidAmount
                 );
             } else continue;
         }
     }
 
+    /// @notice Transfer a NFT Token
     function transferNFT(
         address _tokenAddress,
         uint256 _tokenId,
@@ -349,14 +411,33 @@ contract LendCore {
         }
     }
 
+    /// @notice Check whether the liquidation requirements are met
+    /// @param _NFTID: NFT ID (bytes32)
+    /// @param _referencePrice: Price from the oracle
     function checkLiquidation(bytes32 _NFTID, uint256 _referencePrice)
         internal
+        view
     {
         uint256 pending = pendingInterest(_NFTID);
         bytes32 bidId = activeMatchList[_NFTID];
         require(
-            _referencePrice <= bidList[bidId].bidPrice + pending,
+            _referencePrice <= bidList[bidId].bidAmount + pending,
             "not fufill the liuquidation requirements"
         );
+    }
+
+    ///  ******************************  ///
+    ///        Owner Function Part       ///
+    ///  ******************************  ///
+
+    function ownershipTransfer(address _newOwner) external onlyOwner {
+        require(_newOwner != address(0), "empty address");
+        owner = _newOwner;
+        emit OwnershipTransfer(_newOwner);
+    }
+
+    function setFeeRate(uint256 _newRate) external onlyOwner {
+        require(_newRate >= 0 && _newRate < 100, "fee rate outside 0~100");
+        feeRate = _newRate;
     }
 }

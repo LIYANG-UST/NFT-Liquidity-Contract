@@ -1,6 +1,6 @@
 {
   "name": "nft-liquidity-contract",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "NFT valuing and NFT value adding platform",
   "directories": {
     "test": "test"
