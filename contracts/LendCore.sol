@@ -5,6 +5,7 @@ pragma abicoder v2;
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 
 /// @title  Lend Core
 /// @notice This is the core contract of lending.
@@ -26,7 +27,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 ///         lender提取 NFT  需要满足清算条件 check清算条件  取消订单 cancelOrder
 ///         利息计算器
 
-contract LendCore {
+contract LendCore is IERC721Receiver {
     using SafeERC20 for IERC20;
 
     address owner;
@@ -36,6 +37,8 @@ contract LendCore {
     uint256 bidRewardPerBlock;
 
     uint256 feeRate;
+
+    uint256 globalId;
 
     enum Status {
         NULL,
@@ -59,6 +62,7 @@ contract LendCore {
 
     /// @dev NFTInfo defination and storage
     struct NFTInfo {
+        address owner;
         address tokenAddress;
         uint256 tokenId;
         Status status;
@@ -70,6 +74,8 @@ contract LendCore {
     mapping(bytes32 => bytes32[]) matchList;
 
     mapping(bytes32 => bytes32) activeMatchList;
+
+    mapping(uint256 => bytes32) globalNFTList;
 
     event NFTDeposited(address _tokenAddress, uint256 _tokenId, address _owner);
     event NewBid(
@@ -98,10 +104,25 @@ contract LendCore {
     event Liquidation(address _tokenAddress, uint256 _tokenId, address _owner);
     event OwnershipTransfer(address _newOwner);
 
-    constructor(uint256 _bidRewardPerBlock, uint256 _feeRate) {
+    constructor(
+        uint256 _bidRewardPerBlock,
+        uint256 _feeRate,
+        address _usd
+    ) {
         owner = msg.sender;
         bidRewardPerBlock = _bidRewardPerBlock;
         feeRate = _feeRate;
+        usd = IERC20(_usd);
+    }
+
+    /// @notice Make this contract can receive ERC721 tokens
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes memory
+    ) public virtual override returns (bytes4) {
+        return this.onERC721Received.selector;
     }
 
     ///  ******************************  ///
@@ -135,7 +156,7 @@ contract LendCore {
 
         BidInfo memory bid = bidList[activeMatchList[_NFTID]];
         require(
-            block.number > bid.startBlock,
+            block.number >= bid.startBlock,
             "has not reached the startBlock"
         );
 
@@ -177,6 +198,42 @@ contract LendCore {
         return _nftInfo;
     }
 
+    /// @notice Get the active match result for a certain NFTID
+    /// @param _NFTID: NFT ID (bytes32)
+    function showActiveMatch(bytes32 _NFTID)
+        public
+        view
+        returns (BidInfo memory)
+    {
+        BidInfo memory bid = bidList[activeMatchList[_NFTID]];
+        return bid;
+    }
+
+    /// @notice Show all the NFTs in the pool,
+    ///         including those that has been redeemed/liquidated
+    function showGlobalList() public view returns (NFTInfo[] memory) {
+        NFTInfo[] memory _nftInfo = new NFTInfo[](globalId);
+        for (uint256 i = 0; i < globalId; i++) {
+            _nftInfo[i] = NFTList[globalNFTList[i]];
+        }
+        return _nftInfo;
+    }
+
+    function hasRecorded(bytes32 _NFTID) public view returns (bool) {
+        for (uint256 i = 0; i < globalId; i++) {
+            if (globalNFTList[i] == _NFTID) return true;
+            else continue;
+        }
+        return false;
+    }
+
+    function getRecorded(bytes32 _NFTID) public view returns (uint256) {
+        for (uint256 i = 0; i < globalId; i++) {
+            if (globalNFTList[i] == _NFTID) return i;
+            else continue;
+        }
+    }
+
     ///  ******************************  ///
     ///        Main Function Part        ///
     ///  ******************************  ///
@@ -191,7 +248,10 @@ contract LendCore {
         checkOwnership(_tokenAddress, _tokenId);
         bytes32 NFTID = keccak256(abi.encodePacked(_tokenAddress, _tokenId));
 
+        bool recorded = hasRecorded(NFTID);
+
         NFTInfo memory tempNFTInfo = NFTInfo(
+            msg.sender,
             _tokenAddress,
             _tokenId,
             Status.FREE
@@ -199,6 +259,13 @@ contract LendCore {
         NFTList[NFTID] = tempNFTInfo;
 
         userNFTList[msg.sender].push(NFTID);
+
+        if (!recorded) {
+            globalNFTList[globalId] = NFTID;
+            globalId += 1;
+        }
+
+        transferNFT(_tokenAddress, _tokenId, msg.sender, address(this));
 
         emit NFTDeposited(_tokenAddress, _tokenId, msg.sender);
     }
@@ -219,6 +286,11 @@ contract LendCore {
         require(_timeLength > 0, "should have a period");
 
         bytes32 bidId = keccak256(abi.encodePacked(msg.sender, _NFTID));
+
+        require(
+            bidList[bidId].bider == address(0),
+            "already bid for this NFT, can not bid twice"
+        );
 
         BidInfo memory tempBidInfo = BidInfo(
             msg.sender,
@@ -267,7 +339,13 @@ contract LendCore {
     {
         // Update the NFT Info
         NFTInfo storage nft = NFTList[_NFTID];
-        checkOwnership(nft.tokenAddress, nft.tokenId);
+        // checkOwnership(nft.tokenAddress, nft.tokenId);
+        require(msg.sender == nft.owner, "you do not own this NFT");
+        require(
+            nft.status != Status.MATCHED,
+            "this NFT has already been matched"
+        );
+
         nft.status = Status.MATCHED;
 
         // Update the Bid Info
@@ -299,16 +377,20 @@ contract LendCore {
         NFTInfo storage nft = NFTList[_NFTID];
         require(nft.tokenAddress != address(0), "this NFT does not exist");
 
-        checkOwnership(nft.tokenAddress, nft.tokenId);
-
+        // checkOwnership(nft.tokenAddress, nft.tokenId);
         require(
             nft.status == Status.MATCHED,
             "this nft is not matched currently"
         );
 
+        require(
+            bidList[activeMatchList[_NFTID]].bider == msg.sender,
+            "only the bider can liquidate"
+        );
+
         checkLiquidation(_NFTID, _referencePrice);
 
-        transferNFT(nft.tokenAddress, nft.tokenId, msg.sender);
+        transferNFT(nft.tokenAddress, nft.tokenId, address(this), msg.sender);
         emit Liquidation(nft.tokenAddress, nft.tokenId, msg.sender);
 
         delete NFTList[_NFTID];
@@ -321,11 +403,17 @@ contract LendCore {
 
         require(nft.tokenAddress != address(0), "this nft does not exist");
 
-        checkOwnership(nft.tokenAddress, nft.tokenId);
+        // checkOwnership(nft.tokenAddress, nft.tokenId);
+        require(msg.sender == nft.owner, "you do not own this NFT");
 
         if (nft.status == Status.FREE) {
             /// @dev If it is free, the owner can redeem it back
-            transferNFT(nft.tokenAddress, nft.tokenId, msg.sender);
+            transferNFT(
+                nft.tokenAddress,
+                nft.tokenId,
+                address(this),
+                msg.sender
+            );
             emit FreeNFTRedeemed(nft.tokenAddress, nft.tokenId, msg.sender);
         } else if (nft.status == Status.MATCHED) {
             /// @dev If it is matched, you need to pay the interest first
@@ -337,7 +425,12 @@ contract LendCore {
                 lender,
                 interestToPay + loanAmount
             );
-            transferNFT(nft.tokenAddress, nft.tokenId, msg.sender);
+            transferNFT(
+                nft.tokenAddress,
+                nft.tokenId,
+                address(this),
+                msg.sender
+            );
             emit MatchedNFTRedeemed(nft.tokenAddress, nft.tokenId, msg.sender);
         }
 
@@ -389,13 +482,10 @@ contract LendCore {
     function transferNFT(
         address _tokenAddress,
         uint256 _tokenId,
-        address _owner
+        address _from,
+        address _to
     ) internal {
-        IERC721(_tokenAddress).safeTransferFrom(
-            address(this),
-            _owner,
-            _tokenId
-        );
+        IERC721(_tokenAddress).safeTransferFrom(_from, _to, _tokenId);
     }
 
     function removeBidFromMatch(bytes32 _NFTID, bytes32 _bidId) internal {
@@ -403,10 +493,11 @@ contract LendCore {
 
         for (uint256 i = 0; i < length; i++) {
             if (matchList[_NFTID][i] == _bidId) {
-                for (uint256 j = 0; j < length - i; j++) {
+                for (uint256 j = i; j < length - 1; j++) {
                     matchList[_NFTID][j] = matchList[_NFTID][j + 1];
                 }
                 matchList[_NFTID].pop();
+                return;
             } else continue;
         }
     }
