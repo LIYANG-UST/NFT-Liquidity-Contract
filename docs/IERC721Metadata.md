@@ -1,24 +1,23 @@
-# IERC20Metadata.sol
+# ERC-721 Non-Fungible Token Standard, optional metadata extension (IERC721Metadata.sol)
 
-View Source: [@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol](../@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol)
+View Source: [@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol](../@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol)
 
-**↗ Extends: [IERC20](IERC20.md)**
-**↘ Derived Contracts: [ERC20](ERC20.md)**
+**↗ Extends: [IERC721](IERC721.md)**
+**↘ Derived Contracts: [ERC721](ERC721.md)**
 
-**IERC20Metadata**
+**IERC721Metadata**
 
-Interface for the optional metadata functions from the ERC20 standard.
- _Available since v4.1._
+See https://eips.ethereum.org/EIPS/eip-721
 
 ## Functions
 
 - [name()](#name)
 - [symbol()](#symbol)
-- [decimals()](#decimals)
+- [tokenURI(uint256 tokenId)](#tokenuri)
 
 ### name
 
-Returns the name of the token.
+Returns the token collection name.
 
 ```js
 function name() external view
@@ -32,7 +31,7 @@ returns(string)
 
 ### symbol
 
-Returns the symbol of the token.
+Returns the token collection symbol.
 
 ```js
 function symbol() external view
@@ -44,19 +43,20 @@ returns(string)
 | Name        | Type           | Description  |
 | ------------- |------------- | -----|
 
-### decimals
+### tokenURI
 
-Returns the decimals places of the token.
+Returns the Uniform Resource Identifier (URI) for `tokenId` token.
 
 ```js
-function decimals() external view
-returns(uint8)
+function tokenURI(uint256 tokenId) external view
+returns(string)
 ```
 
 **Arguments**
 
 | Name        | Type           | Description  |
 | ------------- |------------- | -----|
+| tokenId | uint256 |  | 
 
 ## Contracts
 

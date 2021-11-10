@@ -1,48 +1,46 @@
-# Migrations.sol
+# TestNFT.sol
 
-View Source: [contracts/Migrations.sol](../contracts/Migrations.sol)
+View Source: [contracts/TestNFT.sol](../contracts/TestNFT.sol)
 
-**Migrations**
+**↗ Extends: [ERC721](ERC721.md), [Ownable](Ownable.md)**
+
+**TestNFT**
 
 ## Contract Members
 **Constants & Variables**
 
 ```js
-address public owner;
-uint256 public last_completed_migration;
+uint256 public _nextId;
 
 ```
-
-## Modifiers
-
-- [restricted](#restricted)
-
-### restricted
-
-```js
-modifier restricted() internal
-```
-
-**Arguments**
-
-| Name        | Type           | Description  |
-| ------------- |------------- | -----|
 
 ## Functions
 
-- [setCompleted(uint256 completed)](#setcompleted)
+- [constructor()](#)
+- [mint(address _to)](#mint)
 
-### setCompleted
+### 
 
 ```js
-function setCompleted(uint256 completed) public nonpayable restricted 
+function () public nonpayable ERC721 
 ```
 
 **Arguments**
 
 | Name        | Type           | Description  |
 | ------------- |------------- | -----|
-| completed | uint256 |  | 
+
+### mint
+
+```js
+function mint(address _to) public nonpayable onlyOwner 
+```
+
+**Arguments**
+
+| Name        | Type           | Description  |
+| ------------- |------------- | -----|
+| _to | address |  | 
 
 ## Contracts
 
